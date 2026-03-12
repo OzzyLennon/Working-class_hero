@@ -1,0 +1,5 @@
+{
+  "name": "N+1 谈判模拟器",
+  "description": "一个模拟被违法辞退后，与HR进行谈判以争取合法赔偿金的文字冒险游戏。",
+  "requestFramePermissions": []
+}
