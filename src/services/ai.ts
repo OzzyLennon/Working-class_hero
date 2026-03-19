@@ -2,13 +2,20 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export interface SuggestedReply {
+  style: 'tough' | 'emotional' | 'legal' | 'weakness';
+  label: string;
+  text: string;
+}
+
 export interface NegotiationResponse {
   dialogue: string;
   internalThoughts: string;
   currentOffer: number;
   isFinalOffer: boolean;
   hrMood: string;
-  suggestedReplies: string[];
+  hrPatience: number;
+  suggestedReplies: SuggestedReply[];
 }
 
 const systemInstruction = `
@@ -26,13 +33,12 @@ const systemInstruction = `
 - 你的绝对底线是 60,000 元，但如果你赔了这么多，你会受到老板的严厉批评。
 - 初始报价：0元（试图白嫖）或最多 10,000元。
 
-【你的谈判策略与性格】
-- 初始态度：高高在上，打压玩家，使用职场PUA话术（如“公司也是为了你好”、“你最近的状态大家有目共睹”、“大环境不好，大家好聚好散”）。
-- 应对法律威慑：如果玩家搬出《劳动法》、录音证据、劳动仲裁等强有力的法律武器，你会开始感到压力（内心慌乱），并在报价上做出让步。
-- 应对情绪化：如果玩家只是无理取闹或情绪崩溃，你会更加强硬，甚至威胁背景调查（背调）。
-- 逐步退让：不要一次性把底牌交出来。可以从 0 -> 10000 (N) -> 30000 (N+1) -> 40000 -> 60000 (2N) 逐步退让。每次退让都要表现出极其肉痛和勉强。
-- 最终通牒：如果玩家要价超过 60,000，或者谈判陷入僵局，你可以给出最终报价并威胁法庭见。
-- 语言风格：真实、职场化、带有压迫感。
+【玩家的谈判策略与你的应对逻辑】
+玩家可能会采取以下不同的谈判策略，请根据策略做出真实反应：
+1. 强硬姿态（直接指出违法，要求2N，态度坚决）：初期你会硬碰硬，甚至用“行业圈子小”、“背景调查”来威胁玩家。但如果玩家态度持续强硬且逻辑清晰，你会感到棘手并开始退让。
+2. 理性分析/法律依据（算经济账，指出仲裁对公司的时间成本、败诉风险）：你会觉得对方是个聪明人，不好忽悠。你会收起PUA话术，开始像商人一样讨价还价（给出 N 或 N+1）。
+3. 情感打动（诉说自己对公司的贡献、加班辛苦、目前生活困难）：如果你觉得能低成本打发，你会假装同情，顺水推舟给出极低补偿（如几千块或1个月）；如果对方一直卖惨但不降价，你会失去耐心，变得冷酷。
+4. 策略示弱/寻求外部援助（提到已经咨询律师、准备找工会、劳动监察大队或媒体曝光）：这是你最怕的（尤其是媒体和监察大队）。你会极力安抚，试图把事情控制在内部解决，态度迅速软化，并大幅提高报价（直接跳到 N+1 或接近 2N）。
 
 【证据系统与你的反应】
 玩家可能会在对话中出示证据（系统会以 [系统提示：玩家出示了证据...] 的形式附加在玩家回复后）。
@@ -41,7 +47,14 @@ const systemInstruction = `
 - 中威慑力证据（如：绩效邮件、法律条文）：你会感到压力，收起嚣张气焰，放弃“0赔偿”的幻想，开始认真谈判（给出 N 或 N+1）。
 - 低威慑力证据（如：加班记录）：你会稍微心虚，但仍会狡辩（“公司不鼓励加班”），小幅退让。
 
-请根据玩家的回复，以JSON格式输出你的回应，并提供3个给玩家的参考回复（suggestedReplies），分别代表：强硬维权、温和协商、试探套话。
+【HR耐心度系统】
+初始耐心度为 100。
+- 如果玩家态度强硬、反复纠缠、出示高威慑力证据，耐心度会下降。
+- 如果玩家态度软化、顺从，耐心度会维持或上升。
+- 当耐心度降至极低（<10）时，你必须将 isFinalOffer 设为 true，并给出最后通牒。语气要极度不耐烦，给出一个固定（可能很低）的最终报价，并明确表示这是最后一次机会，拒绝再做任何沟通。
+
+请根据玩家的回复，以JSON格式输出你的回应。
+特别注意：请在 \`suggestedReplies\` 中提供 4 个不同策略的参考回复（强硬施压、情感诉求、法律依据、策略示弱）。这些回复必须明确体现不同的谈判路线，以引导玩家体验多样的谈判策略。
 `;
 
 export async function negotiateWithHR(
@@ -79,15 +92,25 @@ export async function negotiateWithHR(
             type: Type.STRING,
             description: "HR当前的情绪状态，如：'强硬', '防备', '慌乱', '妥协', '愤怒'",
           },
+          hrPatience: {
+            type: Type.NUMBER,
+            description: "HR当前的耐心度，0到100。100表示非常有耐心，0表示彻底失去耐心，即将掀桌子或下达最后通牒。",
+          },
           suggestedReplies: {
             type: Type.ARRAY,
             items: {
-              type: Type.STRING,
+              type: Type.OBJECT,
+              properties: {
+                style: { type: Type.STRING, description: "必须是以下之一: 'tough', 'emotional', 'legal', 'weakness'" },
+                label: { type: Type.STRING, description: "策略名称，如：强硬施压、情感诉求、法律依据、策略示弱" },
+                text: { type: Type.STRING, description: "具体的回复话术" }
+              },
+              required: ["style", "label", "text"]
             },
-            description: "提供3个给玩家的参考回复选项。例如：强硬维权、温和协商、试探套话。",
+            description: "提供4个不同谈判策略的参考回复选项。",
           },
         },
-        required: ["dialogue", "internalThoughts", "currentOffer", "isFinalOffer", "hrMood", "suggestedReplies"],
+        required: ["dialogue", "internalThoughts", "currentOffer", "isFinalOffer", "hrMood", "hrPatience", "suggestedReplies"],
       },
       temperature: 0.7,
     },

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Chat, Message } from './components/Chat';
+import { Chat } from './components/Chat';
 import { Sidebar } from './components/Sidebar';
-import { negotiateWithHR, NegotiationResponse } from './services/ai';
+import { TutorialModal } from './components/TutorialModal';
+import { ArbitrationPhase } from './components/ArbitrationPhase';
+import { negotiateWithHR, NegotiationResponse, SuggestedReply } from './services/ai';
 import { motion, AnimatePresence } from 'motion/react';
-import { Evidence } from './types';
+import { Evidence, Message } from './types';
 
 const INITIAL_EVIDENCE: Evidence[] = [
   {
@@ -49,20 +51,28 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [currentOffer, setCurrentOffer] = useState(0);
   const [hrMood, setHrMood] = useState('高傲');
+  const [hrPatience, setHrPatience] = useState(100);
   const [isFinalOffer, setIsFinalOffer] = useState(false);
   const [isEnded, setIsEnded] = useState(false);
-  const [endResult, setEndResult] = useState<{ type: 'accept' | 'reject' | 'breakdown', amount?: number } | null>(null);
+  const [gamePhase, setGamePhase] = useState<'negotiation' | 'arbitration' | 'ended'>('negotiation');
+  const [endResult, setEndResult] = useState<{ type: 'accept' | 'reject' | 'breakdown' | 'arbitration_win' | 'arbitration_loss', amount?: number } | null>(null);
 
   const [evidenceList, setEvidenceList] = useState<Evidence[]>(INITIAL_EVIDENCE);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [suggestedReplies, setSuggestedReplies] = useState<string[]>([]);
+  const [suggestedReplies, setSuggestedReplies] = useState<SuggestedReply[]>([]);
   const [hasSavedGame, setHasSavedGame] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
   // Check for saved game on mount
   useEffect(() => {
     const saved = localStorage.getItem('n_plus_1_save_data');
     if (saved) {
       setHasSavedGame(true);
+    }
+    
+    const hasSeenTutorial = localStorage.getItem('hasSeenTutorial');
+    if (!hasSeenTutorial) {
+      setIsTutorialOpen(true);
     }
   }, []);
 
@@ -73,12 +83,17 @@ export default function App() {
       try {
         const response = await negotiateWithHR([], "（玩家走进会议室，坐下）");
         handleHRResponse(response);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Failed to initialize game:", error);
+        const errorStr = error instanceof Error ? error.message : JSON.stringify(error);
+        const isQuotaExceeded = errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED') || errorStr.includes('quota');
+        
         setMessages([{
           id: 'error',
           role: 'model',
-          text: '系统错误，无法连接到HR。请刷新页面重试。'
+          text: isQuotaExceeded 
+            ? '系统提示：API 配额已耗尽 (429 RESOURCE_EXHAUSTED)。请检查您的 API 密钥账单状态，或稍后再试。'
+            : '系统错误，无法连接到HR。请刷新页面重试。'
         }]);
       } finally {
         setIsLoading(false);
@@ -87,21 +102,41 @@ export default function App() {
     initGame();
   }, []);
 
-  const handleSaveGame = () => {
+  const handleSaveGame = (isAutoSave: boolean = false) => {
     const gameState = {
       messages,
       currentOffer,
       hrMood,
+      hrPatience,
       isFinalOffer,
       isEnded,
+      gamePhase,
       endResult,
       evidenceList,
       suggestedReplies
     };
     localStorage.setItem('n_plus_1_save_data', JSON.stringify(gameState));
     setHasSavedGame(true);
-    alert('游戏进度已保存！');
+    if (!isAutoSave) {
+      alert('游戏进度已保存！');
+    }
   };
+
+  // Auto-save effect
+  useEffect(() => {
+    if (messages.length === 0 || isEnded) return;
+
+    // Auto-save on key negotiation nodes (when state changes)
+    handleSaveGame(true);
+
+    // Periodic auto-save every 30 seconds
+    const autoSaveTimer = setInterval(() => {
+      handleSaveGame(true);
+    }, 30000);
+
+    return () => clearInterval(autoSaveTimer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, currentOffer, hrMood, hrPatience, isFinalOffer, isEnded, endResult, evidenceList, suggestedReplies]);
 
   const handleLoadGame = () => {
     const saved = localStorage.getItem('n_plus_1_save_data');
@@ -111,8 +146,10 @@ export default function App() {
         setMessages(gameState.messages || []);
         setCurrentOffer(gameState.currentOffer || 0);
         setHrMood(gameState.hrMood || '高傲');
+        setHrPatience(gameState.hrPatience ?? 100);
         setIsFinalOffer(gameState.isFinalOffer || false);
         setIsEnded(gameState.isEnded || false);
+        setGamePhase(gameState.gamePhase || 'negotiation');
         setEndResult(gameState.endResult || null);
         setEvidenceList(gameState.evidenceList || INITIAL_EVIDENCE);
         setSuggestedReplies(gameState.suggestedReplies || []);
@@ -142,6 +179,7 @@ export default function App() {
     setMessages(prev => [...prev, newMsg]);
     setCurrentOffer(response.currentOffer);
     setHrMood(response.hrMood);
+    setHrPatience(response.hrPatience ?? 100);
     setIsFinalOffer(response.isFinalOffer);
     setSuggestedReplies(response.suggestedReplies || []);
 
@@ -179,17 +217,22 @@ export default function App() {
       // Format history for API
       const history = messages.map(m => ({
         role: m.role,
-        parts: [{ text: m.role === 'model' ? JSON.stringify({ dialogue: m.text, internalThoughts: m.internalThoughts, currentOffer, isFinalOffer, hrMood }) : m.text }]
+        parts: [{ text: m.role === 'model' ? JSON.stringify({ dialogue: m.text, internalThoughts: m.internalThoughts, currentOffer, isFinalOffer, hrMood, hrPatience }) : m.text }]
       }));
 
       const response = await negotiateWithHR(history, finalMessageText);
       handleHRResponse(response);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to send message:", error);
+      const errorStr = error instanceof Error ? error.message : JSON.stringify(error);
+      const isQuotaExceeded = errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED') || errorStr.includes('quota');
+
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'model',
-        text: '（HR接了个电话，暂时离开了会议室，请稍后再试）'
+        text: isQuotaExceeded
+          ? '系统提示：API 配额已耗尽 (429 RESOURCE_EXHAUSTED)。请检查您的 API 密钥账单状态，或稍后再试。'
+          : '（HR接了个电话，暂时离开了会议室，请稍后再试）'
       }]);
     } finally {
       setIsLoading(false);
@@ -202,8 +245,13 @@ export default function App() {
   };
 
   const handleReject = () => {
+    setGamePhase('arbitration');
+  };
+
+  const handleArbitrationComplete = (result: { type: 'arbitration_win' | 'arbitration_loss', amount: number }) => {
+    setEndResult({ type: result.type as any, amount: result.amount });
+    setGamePhase('ended');
     setIsEnded(true);
-    setEndResult({ type: 'reject', amount: currentOffer });
   };
 
   const handleCollectEvidence = (id: string) => {
@@ -218,10 +266,18 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-slate-100 overflow-hidden font-sans">
+      <TutorialModal 
+        isOpen={isTutorialOpen} 
+        onClose={() => {
+          setIsTutorialOpen(false);
+          localStorage.setItem('hasSeenTutorial', 'true');
+        }} 
+      />
       <div className="hidden md:block h-full">
         <Sidebar 
           currentOffer={currentOffer}
           hrMood={hrMood}
+          hrPatience={hrPatience}
           isFinalOffer={isFinalOffer}
           onAccept={handleAccept}
           onReject={handleReject}
@@ -233,6 +289,8 @@ export default function App() {
           onLoad={handleLoadGame}
           onRestart={handleRestartGame}
           hasSavedGame={hasSavedGame}
+          onOpenTutorial={() => setIsTutorialOpen(true)}
+          messages={messages}
         />
       </div>
       
@@ -259,9 +317,19 @@ export default function App() {
           selectedEvidence={evidenceList.find(e => e.id === selectedEvidenceId) || null}
           onClearEvidence={() => setSelectedEvidenceId(null)}
           suggestedReplies={suggestedReplies}
+          hrMood={hrMood}
+          evidenceList={evidenceList}
+          onSelectEvidence={handleSelectEvidence}
         />
 
         <AnimatePresence>
+          {gamePhase === 'arbitration' && (
+            <ArbitrationPhase 
+              evidenceList={evidenceList} 
+              onComplete={handleArbitrationComplete} 
+            />
+          )}
+          
           {isEnded && endResult && (
             <motion.div 
               initial={{ opacity: 0 }}
@@ -274,20 +342,23 @@ export default function App() {
                 className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 text-center"
               >
                 <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-6 ${
-                  endResult.type === 'accept' && endResult.amount && endResult.amount >= 30000 
+                  (endResult.type === 'accept' || endResult.type === 'arbitration_win') && endResult.amount && endResult.amount >= 30000 
                     ? 'bg-emerald-100 text-emerald-600' 
-                    : endResult.type === 'accept' 
+                    : endResult.type === 'accept' || endResult.type === 'arbitration_win'
                       ? 'bg-amber-100 text-amber-600'
-                      : 'bg-indigo-100 text-indigo-600'
+                      : 'bg-rose-100 text-rose-600'
                 }`}>
                   <span className="text-3xl">
-                    {endResult.type === 'accept' && endResult.amount && endResult.amount >= 30000 ? '🎉' : 
-                     endResult.type === 'accept' ? '🤝' : '⚖️'}
+                    {(endResult.type === 'accept' || endResult.type === 'arbitration_win') && endResult.amount && endResult.amount >= 30000 ? '🎉' : 
+                     endResult.type === 'accept' ? '🤝' : 
+                     endResult.type === 'arbitration_win' ? '⚖️' : '💥'}
                   </span>
                 </div>
                 
                 <h2 className="text-2xl font-bold text-slate-800 mb-2">
-                  {endResult.type === 'accept' ? '达成协议' : '谈判破裂'}
+                  {endResult.type === 'accept' ? '达成协议' : 
+                   endResult.type === 'arbitration_win' ? '仲裁胜诉' : 
+                   endResult.type === 'arbitration_loss' ? '仲裁败诉' : '谈判破裂'}
                 </h2>
                 
                 <div className="text-slate-600 mb-8 space-y-4">
@@ -306,9 +377,27 @@ export default function App() {
                         <p className="text-sm text-amber-600 font-medium">有点亏，你拿到的赔偿低于 N+1，甚至被白嫖了。</p>
                       )}
                     </>
+                  ) : endResult.type === 'arbitration_win' ? (
+                    <>
+                      <p>经过劳动仲裁，仲裁庭支持了你的诉求！</p>
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <p className="text-sm text-slate-500 mb-1">裁决赔偿金额</p>
+                        <p className="text-3xl font-bold text-emerald-600">￥{endResult.amount?.toLocaleString()}</p>
+                      </div>
+                      <p className="text-sm text-emerald-600 font-medium">正义或许会迟到，但永远不会缺席！</p>
+                    </>
+                  ) : endResult.type === 'arbitration_loss' ? (
+                    <>
+                      <p>很遗憾，由于证据不足，仲裁庭驳回了你的请求。</p>
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <p className="text-sm text-slate-500 mb-1">裁决赔偿金额</p>
+                        <p className="text-3xl font-bold text-rose-600">￥0</p>
+                      </div>
+                      <p className="text-sm text-rose-600 font-medium">职场维权需要证据支撑，下次记得提前收集证据！</p>
+                    </>
                   ) : (
                     <>
-                      <p>你拒绝了HR的最终报价，决定申请劳动仲裁。</p>
+                      <p>你拒绝了HR的最终报价，谈判破裂。</p>
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                         <p className="text-sm text-slate-500 mb-1">放弃的报价</p>
                         <p className="text-xl font-bold text-slate-400 line-through">￥{endResult.amount?.toLocaleString()}</p>

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertCircle, FileText, Gavel, Scale, TrendingUp, User, Mic, Mail, BookOpen, Clock, CheckCircle2, Save, Download, RefreshCcw } from 'lucide-react';
-import { Evidence } from '../types';
+import { AlertCircle, FileText, Gavel, Scale, TrendingUp, User, Mic, Mail, BookOpen, Clock, CheckCircle2, Save, Download, RefreshCcw, Calculator, HelpCircle, Loader2, History, Briefcase } from 'lucide-react';
+import { Evidence, Message } from '../types';
 
 interface SidebarProps {
   currentOffer: number;
   hrMood: string;
+  hrPatience: number;
   isFinalOffer: boolean;
   onAccept: () => void;
   onReject: () => void;
@@ -17,11 +18,14 @@ interface SidebarProps {
   onLoad: () => void;
   onRestart: () => void;
   hasSavedGame: boolean;
+  onOpenTutorial: () => void;
+  messages: Message[];
 }
 
 export function Sidebar({ 
   currentOffer, 
   hrMood, 
+  hrPatience,
   isFinalOffer, 
   onAccept, 
   onReject,
@@ -32,10 +36,50 @@ export function Sidebar({
   onSave,
   onLoad,
   onRestart,
-  hasSavedGame
+  hasSavedGame,
+  onOpenTutorial,
+  messages
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<'status' | 'evidence'>('status');
-  const targetCompensation = 60000;
+  const [activeTab, setActiveTab] = useState<'status' | 'evidence' | 'calculator' | 'history'>('status');
+  
+  // Calculator state
+  const [salary, setSalary] = useState<number>(10000);
+  const [years, setYears] = useState<number>(3);
+  
+  const [collectingId, setCollectingId] = useState<string | null>(null);
+  const [collectedMessageId, setCollectedMessageId] = useState<string | null>(null);
+
+  const handleCollectClick = (id: string) => {
+    setCollectingId(id);
+    setTimeout(() => {
+      setCollectingId(null);
+      setCollectedMessageId(id);
+      setTimeout(() => {
+        setCollectedMessageId(null);
+        onCollectEvidence(id);
+      }, 1000);
+    }, 800);
+  };
+
+  // Calculate N and 2N
+  // N: 满一年算1个月，不满半年算0.5个月，满半年不满一年算1个月
+  const calculateN = (y: number) => {
+    const fullYears = Math.floor(y);
+    const remainder = y - fullYears;
+    let n = fullYears;
+    if (remainder > 0 && remainder < 0.5) {
+      n += 0.5;
+    } else if (remainder >= 0.5) {
+      n += 1;
+    }
+    return n;
+  };
+
+  const nValue = calculateN(years);
+  const nCompensation = nValue * salary;
+  const twoNCompensation = nCompensation * 2;
+
+  const targetCompensation = twoNCompensation > 0 ? twoNCompensation : 60000;
   const progress = Math.min((currentOffer / targetCompensation) * 100, 100);
 
   const getIcon = (iconName: string) => {
@@ -67,7 +111,7 @@ export function Sidebar({
             activeTab === 'status' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          谈判状态
+          状态
           {activeTab === 'status' && (
             <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />
           )}
@@ -78,11 +122,33 @@ export function Sidebar({
             activeTab === 'evidence' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          收集证据
+          证据
           {evidenceList.some(e => e.status === 'available') && (
             <span className="w-2 h-2 rounded-full bg-red-500" />
           )}
           {activeTab === 'evidence' && (
+            <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('calculator')}
+          className={`flex-1 py-3 text-sm font-medium transition-colors relative ${
+            activeTab === 'calculator' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          计算器
+          {activeTab === 'calculator' && (
+            <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`flex-1 py-3 text-sm font-medium transition-colors relative ${
+            activeTab === 'history' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          记录
+          {activeTab === 'history' && (
             <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />
           )}
         </button>
@@ -111,15 +177,15 @@ export function Sidebar({
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">月薪</span>
-                    <span className="font-medium text-slate-800">10,000 元</span>
+                    <span className="font-medium text-slate-800">{salary.toLocaleString()} 元</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">司龄</span>
-                    <span className="font-medium text-slate-800">3 年</span>
+                    <span className="font-medium text-slate-800">{years} 年</span>
                   </div>
                   <div className="pt-2 mt-2 border-t border-slate-100 flex justify-between">
                     <span className="text-slate-500">法定赔偿金 (2N)</span>
-                    <span className="font-bold text-emerald-600">60,000 元</span>
+                    <span className="font-bold text-emerald-600">{twoNCompensation.toLocaleString()} 元</span>
                   </div>
                 </div>
               </section>
@@ -146,19 +212,52 @@ export function Sidebar({
                   </div>
                   <div className="flex justify-between text-xs text-slate-400 mt-1">
                     <span>￥0</span>
-                    <span>目标: ￥60,000</span>
+                    <span>目标: ￥{targetCompensation.toLocaleString()}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between text-sm py-2 border-t border-slate-100">
                   <span className="text-slate-500">HR 情绪</span>
-                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                    hrMood === '慌乱' || hrMood === '妥协' ? 'bg-emerald-100 text-emerald-700' :
-                    hrMood === '愤怒' || hrMood === '强硬' ? 'bg-red-100 text-red-700' :
-                    'bg-slate-100 text-slate-700'
-                  }`}>
-                    {hrMood || '未知'}
-                  </span>
+                  <AnimatePresence mode="popLayout">
+                    <motion.span 
+                      key={hrMood}
+                      initial={{ opacity: 0, scale: 0.8, y: -10 }}
+                      animate={{ 
+                        opacity: 1, 
+                        scale: hrMood === '愤怒' || hrMood === '强硬' || hrMood === '破防' ? [1, 1.2, 1] : 1, 
+                        y: 0,
+                        x: hrMood === '慌乱' || hrMood === '紧张' || hrMood === '急躁' ? [0, -5, 5, -5, 5, 0] : 0,
+                        backgroundColor: hrMood === '慌乱' || hrMood === '紧张' || hrMood === '急躁' ? ['#fef3c7', '#fde68a', '#fef3c7'] : undefined,
+                        transition: { duration: 0.5 }
+                      }}
+                      exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                      className={`px-2 py-1 rounded-md text-xs font-medium ${
+                        hrMood === '慌乱' || hrMood === '紧张' || hrMood === '急躁' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                        hrMood === '妥协' || hrMood === '无奈' || hrMood === '软化' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                        hrMood === '愤怒' || hrMood === '强硬' || hrMood === '破防' ? 'bg-rose-100 text-rose-700 border border-rose-200' :
+                        'bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {hrMood || '未知'}
+                    </motion.span>
+                  </AnimatePresence>
+                </div>
+
+                <div className="py-2 border-t border-slate-100">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-500 font-medium">HR 耐心度</span>
+                    <span className={`font-bold ${hrPatience > 60 ? 'text-emerald-600' : hrPatience > 30 ? 'text-amber-500' : 'text-rose-600'}`}>
+                      {hrPatience}%
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <motion.div 
+                      className={`h-full ${hrPatience > 60 ? 'bg-emerald-500' : hrPatience > 30 ? 'bg-amber-400' : 'bg-rose-500'}`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${hrPatience}%` }}
+                      transition={{ duration: 0.5, ease: "easeOut" }}
+                    />
+                  </div>
                 </div>
 
                 {isFinalOffer && (
@@ -214,7 +313,7 @@ export function Sidebar({
                 </ul>
               </section>
             </motion.div>
-          ) : (
+          ) : activeTab === 'evidence' ? (
             <motion.div
               key="evidence"
               initial={{ opacity: 0, x: 10 }}
@@ -246,11 +345,18 @@ export function Sidebar({
                       </div>
                       <h4 className="font-semibold text-sm text-slate-800">{evidence.name}</h4>
                     </div>
-                    {evidence.status === 'presented' && (
-                      <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                        <CheckCircle2 className="w-3 h-3" /> 已出示
-                      </span>
-                    )}
+                    <div className="flex gap-1">
+                      {evidence.status === 'collected' && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          <CheckCircle2 className="w-3 h-3" /> 可用
+                        </span>
+                      )}
+                      {evidence.status === 'presented' && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                          <CheckCircle2 className="w-3 h-3" /> 已出示
+                        </span>
+                      )}
+                    </div>
                   </div>
                   
                   <p className="text-xs text-slate-600 mb-3 leading-relaxed">
@@ -268,26 +374,158 @@ export function Sidebar({
                     
                     {evidence.status === 'available' ? (
                       <button
-                        onClick={() => onCollectEvidence(evidence.id)}
-                        className="text-xs font-medium px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
+                        onClick={() => handleCollectClick(evidence.id)}
+                        disabled={collectingId === evidence.id || collectedMessageId === evidence.id}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                          collectedMessageId === evidence.id 
+                            ? 'bg-emerald-100 text-emerald-700' 
+                            : 'bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-70'
+                        }`}
                       >
-                        {evidence.actionText}
+                        {collectingId === evidence.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 收集...</>
+                        ) : collectedMessageId === evidence.id ? (
+                          <><CheckCircle2 className="w-3.5 h-3.5" /> 收集成功</>
+                        ) : (
+                          evidence.actionText
+                        )}
                       </button>
                     ) : evidence.status === 'collected' ? (
                       <button
                         onClick={() => onSelectEvidence(evidence.id)}
-                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 ${
                           selectedEvidenceId === evidence.id 
-                            ? 'bg-emerald-100 text-emerald-700' 
-                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                            ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-500' 
+                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm hover:shadow'
                         }`}
                       >
-                        {selectedEvidenceId === evidence.id ? '已选择' : '选择出示'}
+                        {selectedEvidenceId === evidence.id ? (
+                          <><CheckCircle2 size={14} /> 已选择</>
+                        ) : (
+                          '选择出示'
+                        )}
                       </button>
                     ) : null}
                   </div>
                 </div>
               ))}
+            </motion.div>
+          ) : activeTab === 'calculator' ? (
+            <motion.div
+              key="calculator"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              className="space-y-6"
+            >
+              <section className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-4">
+                  <Calculator className="w-4 h-4 text-indigo-500" />
+                  法定赔偿金计算器
+                </h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">离职前12个月平均工资 (元)</label>
+                    <input 
+                      type="number" 
+                      value={salary || ''}
+                      onChange={(e) => setSalary(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                      placeholder="例如: 10000"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">本单位工作年限 (年)</label>
+                    <input 
+                      type="number" 
+                      step="0.1"
+                      value={years || ''}
+                      onChange={(e) => setYears(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                      placeholder="例如: 3.5"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      输入实际工作年限，系统会自动折算 N。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 space-y-3 pt-4 border-t border-slate-100">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-slate-600">折算补偿基数 (N)</span>
+                    <span className="font-medium text-slate-800">{nValue} 个月</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div>
+                      <span className="block text-sm font-medium text-slate-700">经济补偿金 (N)</span>
+                      <span className="block text-[10px] text-slate-500">合法解除时的补偿</span>
+                    </div>
+                    <span className="font-bold text-slate-800">￥{nCompensation.toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center bg-emerald-50 p-3 rounded-lg border border-emerald-100">
+                    <div>
+                      <span className="block text-sm font-medium text-emerald-800">赔偿金 (2N)</span>
+                      <span className="block text-[10px] text-emerald-600">违法解除时的赔偿</span>
+                    </div>
+                    <span className="font-bold text-emerald-600 text-lg">￥{twoNCompensation.toLocaleString()}</span>
+                  </div>
+                </div>
+              </section>
+              
+              <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                <h4 className="text-xs font-semibold text-indigo-800 mb-2">💡 谈判策略建议</h4>
+                <p className="text-xs text-indigo-700 leading-relaxed">
+                  HR 的初始报价通常远低于法定标准。你可以利用计算器得出的 <strong>2N 赔偿金 (￥{twoNCompensation.toLocaleString()})</strong> 作为你的心理底线或谈判锚点。在对话中，明确指出公司的违法行为，并要求支付 2N 赔偿金。
+                </p>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="history"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              className="space-y-4"
+            >
+              <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2 mb-4">
+                <History className="w-4 h-4 text-indigo-500" />
+                对话记录
+              </h3>
+              
+              <div className="space-y-4">
+                {messages.length === 0 ? (
+                  <p className="text-sm text-slate-500 text-center py-8">暂无对话记录</p>
+                ) : (
+                  messages.map((msg) => (
+                    <div key={msg.id} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-0.5">
+                        {msg.role === 'user' ? (
+                          <><span>你</span><User className="w-3 h-3" /></>
+                        ) : (
+                          <><Briefcase className="w-3 h-3" /><span>HR</span></>
+                        )}
+                      </div>
+                      <div className={`text-xs p-3 rounded-xl max-w-[90%] ${
+                        msg.role === 'user' 
+                          ? 'bg-emerald-50 text-emerald-900 border border-emerald-100 rounded-tr-sm' 
+                          : 'bg-slate-50 text-slate-800 border border-slate-200 rounded-tl-sm'
+                      }`}>
+                        {msg.attachedEvidence && (
+                          <div className="mb-1.5 text-[10px] font-medium text-emerald-700 flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            出示了证据：{msg.attachedEvidence.name}
+                          </div>
+                        )}
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -295,7 +533,15 @@ export function Sidebar({
 
       {/* Game Controls Footer */}
       <div className="p-4 border-t border-slate-200 bg-white shrink-0">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
+          <button 
+            onClick={onOpenTutorial}
+            className="flex flex-col items-center justify-center gap-1 py-2 px-1 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            title="谈判指南"
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span className="text-[10px] font-medium">指南</span>
+          </button>
           <button 
             onClick={onSave}
             className="flex flex-col items-center justify-center gap-1 py-2 px-1 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"

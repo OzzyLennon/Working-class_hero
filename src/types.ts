@@ -9,3 +9,11 @@ export interface Evidence {
   actionText: string;
   icon: 'mic' | 'mail' | 'book' | 'clock';
 }
+
+export interface Message {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  internalThoughts?: string;
+  attachedEvidence?: Evidence;
+}
